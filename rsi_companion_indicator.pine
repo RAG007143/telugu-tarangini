@@ -1,0 +1,49 @@
+//@version=5
+indicator("RSI Companion for Intraday Strategy", shorttitle="RSI-IPS", format=format.price, precision=2, timeframe="", timeframe_gaps=true)
+
+// === RSI SETTINGS ===
+rsi_length = input.int(14, "RSI Length", minval=1)
+rsi_overbought = input.int(70, "RSI Overbought Level", minval=50, maxval=100)
+rsi_oversold = input.int(30, "RSI Oversold Level", minval=0, maxval=50)
+
+// Color Settings
+rsi_color = input.color(color.purple, "RSI Line Color")
+ob_color = input.color(color.red, "Overbought Color")
+os_color = input.color(color.green, "Oversold Color")
+
+// === CALCULATE RSI ===
+rsi = ta.rsi(close, rsi_length)
+
+// === PLOTTING ===
+// Main RSI line
+rsi_line = plot(rsi, "RSI", color=rsi_color, linewidth=2)
+
+// Reference lines
+hline(50, "Midline", color=color.gray, linestyle=hline.style_dotted)
+ob_line = hline(rsi_overbought, "Overbought", color=ob_color, linestyle=hline.style_dashed)
+os_line = hline(rsi_oversold, "Oversold", color=os_color, linestyle=hline.style_dashed)
+
+// Fill areas
+fill(rsi_line, ob_line, color=color.new(ob_color, 90), title="Overbought Zone")
+fill(rsi_line, os_line, color=color.new(os_color, 90), title="Oversold Zone")
+
+// === SIGNAL HIGHLIGHTS ===
+// Highlight extreme levels
+bgcolor(rsi > rsi_overbought ? color.new(color.red, 85) : na, title="Overbought Background")
+bgcolor(rsi < rsi_oversold ? color.new(color.green, 85) : na, title="Oversold Background")
+
+// === RSI VALUE DISPLAY ===
+var table rsi_table = table.new(position.top_right, 2, 3, bgcolor=color.white, border_width=1)
+
+if barstate.islast
+    table.cell(rsi_table, 0, 0, "RSI", text_color=color.black, bgcolor=color.gray, text_size=size.normal)
+    table.cell(rsi_table, 1, 0, "Value", text_color=color.black, bgcolor=color.gray, text_size=size.normal)
+    
+    rsi_text_color = rsi > rsi_overbought ? color.red : rsi < rsi_oversold ? color.green : color.black
+    table.cell(rsi_table, 0, 1, "Current", text_color=color.black, text_size=size.normal)
+    table.cell(rsi_table, 1, 1, str.tostring(math.round(rsi, 2)), text_color=rsi_text_color, text_size=size.normal)
+    
+    table.cell(rsi_table, 0, 2, "Status", text_color=color.black, text_size=size.normal)
+    status_text = rsi > rsi_overbought ? "OB" : rsi < rsi_oversold ? "OS" : "NEUTRAL"
+    status_color = rsi > rsi_overbought ? color.red : rsi < rsi_oversold ? color.green : color.gray
+    table.cell(rsi_table, 1, 2, status_text, text_color=status_color, text_size=size.normal)

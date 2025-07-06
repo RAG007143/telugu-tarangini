@@ -1,0 +1,171 @@
+//@version=5
+strategy("Intraday Power Strategy - 15min (Final)", shorttitle="IPS-15m", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=10, initial_capital=10000)
+
+// === STRATEGY INPUTS ===
+// EMA Settings
+ema_fast_length = input.int(9, "Fast EMA Length", minval=1)
+ema_slow_length = input.int(21, "Slow EMA Length", minval=1)
+
+// RSI Settings
+rsi_length = input.int(14, "RSI Length", minval=1)
+rsi_overbought = input.int(70, "RSI Overbought Level", minval=50, maxval=100)
+rsi_oversold = input.int(30, "RSI Oversold Level", minval=0, maxval=50)
+
+// Volume Settings
+volume_ma_length = input.int(20, "Volume MA Length", minval=1)
+volume_multiplier = input.float(1.5, "Volume Multiplier", minval=0.1, step=0.1)
+
+// ATR Settings for Stop Loss
+atr_length = input.int(14, "ATR Length", minval=1)
+atr_multiplier = input.float(2.0, "ATR Stop Loss Multiplier", minval=0.1, step=0.1)
+
+// Time Session (Intraday Trading Hours)
+session_start = input.session("0930-1530", "Trading Session", tooltip="Set your local market hours")
+in_session = not na(time(timeframe.period, session_start))
+
+// Display Options
+show_rsi_info = input.bool(true, "Show RSI Info", tooltip="Show RSI level on chart")
+show_volume_bg = input.bool(true, "Show Volume Background", tooltip="Highlight high volume periods")
+
+// === TECHNICAL INDICATORS ===
+// EMAs
+ema_fast = ta.ema(close, ema_fast_length)
+ema_slow = ta.ema(close, ema_slow_length)
+
+// RSI
+rsi = ta.rsi(close, rsi_length)
+
+// Volume
+volume_ma = ta.sma(volume, volume_ma_length)
+high_volume = volume > volume_ma * volume_multiplier
+
+// ATR for dynamic stop loss
+atr = ta.atr(atr_length)
+
+// Trend Direction
+trend_up = ema_fast > ema_slow
+trend_down = ema_fast < ema_slow
+
+// === ENTRY CONDITIONS ===
+// Long Entry Conditions
+long_ema_cross = ta.crossover(ema_fast, ema_slow)
+long_rsi_ok = rsi > 40 and rsi < 80  // Not oversold, not extremely overbought
+long_volume_ok = high_volume
+long_condition = long_ema_cross and long_rsi_ok and long_volume_ok and in_session
+
+// Short Entry Conditions
+short_ema_cross = ta.crossunder(ema_fast, ema_slow)
+short_rsi_ok = rsi < 60 and rsi > 20  // Not overbought, not extremely oversold
+short_volume_ok = high_volume
+short_condition = short_ema_cross and short_rsi_ok and short_volume_ok and in_session
+
+// === EXIT CONDITIONS ===
+// Take Profit and Stop Loss levels
+long_stop_loss = close - atr * atr_multiplier
+short_stop_loss = close + atr * atr_multiplier
+
+// Exit on opposite signal or end of session
+long_exit = short_ema_cross or rsi > rsi_overbought or not in_session
+short_exit = long_ema_cross or rsi < rsi_oversold or not in_session
+
+// === STRATEGY EXECUTION ===
+if long_condition
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long SL", "Long", stop=long_stop_loss)
+
+if short_condition
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short SL", "Short", stop=short_stop_loss)
+
+// Force exit on conditions
+if long_exit
+    strategy.close("Long")
+
+if short_exit
+    strategy.close("Short")
+
+// === PLOTTING ===
+// EMAs
+plot(ema_fast, "Fast EMA", color=color.blue, linewidth=2)
+plot(ema_slow, "Slow EMA", color=color.red, linewidth=2)
+
+// Entry Signals
+plotshape(long_condition, "Buy Signal", shape.labelup, location.belowbar, color.green, size=size.normal, text="BUY")
+plotshape(short_condition, "Sell Signal", shape.labeldown, location.abovebar, color.red, size=size.normal, text="SELL")
+
+// Support and Resistance levels (previous day high/low)
+prev_day_high = request.security(syminfo.tickerid, "1D", high[1], lookahead=barmerge.lookahead_off)
+prev_day_low = request.security(syminfo.tickerid, "1D", low[1], lookahead=barmerge.lookahead_off)
+
+plot(prev_day_high, "Previous Day High", color=color.orange, linewidth=1, style=plot.style_line)
+plot(prev_day_low, "Previous Day Low", color=color.orange, linewidth=1, style=plot.style_line)
+
+// Volume indicator on chart
+if show_volume_bg
+    bgcolor(high_volume ? color.new(color.blue, 95) : na, title="High Volume Background")
+
+// === ALERTS ===
+alertcondition(long_condition, title="Long Entry Alert", message="🟢 BUY Signal: {{ticker}} at {{close}} - EMA Crossover + RSI + Volume Confirmed")
+alertcondition(short_condition, title="Short Entry Alert", message="🔴 SELL Signal: {{ticker}} at {{close}} - EMA Crossunder + RSI + Volume Confirmed")
+alertcondition(long_exit, title="Long Exit Alert", message="⚠️ EXIT LONG: {{ticker}} at {{close}}")
+alertcondition(short_exit, title="Short Exit Alert", message="⚠️ EXIT SHORT: {{ticker}} at {{close}}")
+
+// === STRATEGY STATISTICS TABLE ===
+var table stats_table = table.new(position.top_right, 2, 8, bgcolor=color.white, border_width=1)
+
+if barstate.islast
+    // Calculate safe metrics with division by zero protection
+    total_trades = strategy.closedtrades
+    win_trades = strategy.wintrades
+    loss_trades = strategy.losstrades
+    
+    win_rate = total_trades > 0 ? math.round(win_trades / total_trades * 100, 2) : 0
+    profit_factor = strategy.grossloss > 0 ? math.round(strategy.grossprofit / strategy.grossloss, 2) : 0
+    
+    // Header
+    table.cell(stats_table, 0, 0, "📊 Metric", text_color=color.black, bgcolor=color.gray, text_size=size.small)
+    table.cell(stats_table, 1, 0, "Value", text_color=color.black, bgcolor=color.gray, text_size=size.small)
+    
+    // Stats
+    table.cell(stats_table, 0, 1, "Win Rate", text_color=color.black, text_size=size.small)
+    table.cell(stats_table, 1, 1, str.tostring(win_rate) + "%", text_color=win_rate >= 50 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(stats_table, 0, 2, "Total Trades", text_color=color.black, text_size=size.small)
+    table.cell(stats_table, 1, 2, str.tostring(total_trades), text_color=color.black, text_size=size.small)
+    
+    table.cell(stats_table, 0, 3, "Profit Factor", text_color=color.black, text_size=size.small)
+    table.cell(stats_table, 1, 3, str.tostring(profit_factor), text_color=profit_factor >= 1.2 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(stats_table, 0, 4, "Net Profit", text_color=color.black, text_size=size.small)
+    table.cell(stats_table, 1, 4, str.tostring(math.round(strategy.netprofit, 2)), text_color=strategy.netprofit > 0 ? color.green : color.red, text_size=size.small)
+    
+    table.cell(stats_table, 0, 5, "Max DD", text_color=color.black, text_size=size.small)
+    table.cell(stats_table, 1, 5, str.tostring(math.round(strategy.max_drawdown, 2)), text_color=color.red, text_size=size.small)
+    
+    if show_rsi_info
+        table.cell(stats_table, 0, 6, "Current RSI", text_color=color.black, text_size=size.small)
+        rsi_color = rsi > rsi_overbought ? color.red : rsi < rsi_oversold ? color.green : color.black
+        table.cell(stats_table, 1, 6, str.tostring(math.round(rsi, 2)), text_color=rsi_color, text_size=size.small)
+    
+    table.cell(stats_table, 0, 7, "Session", text_color=color.black, text_size=size.small)
+    table.cell(stats_table, 1, 7, in_session ? "OPEN" : "CLOSED", text_color=in_session ? color.green : color.red, text_size=size.small)
+
+// === RSI INFO LABELS (Alternative to separate pane) ===
+if show_rsi_info and (long_condition or short_condition)
+    label_text = "RSI: " + str.tostring(math.round(rsi, 1))
+    if long_condition
+        label.new(bar_index, low, label_text, style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
+    if short_condition
+        label.new(bar_index, high, label_text, style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
+
+// === POSITION INFO ===
+if strategy.position_size != 0
+    position_text = strategy.position_size > 0 ? "LONG" : "SHORT"
+    position_color = strategy.position_size > 0 ? color.green : color.red
+    var label position_label = na
+    if barstate.islast
+        label.delete(position_label)
+        position_label := label.new(bar_index, strategy.position_size > 0 ? high : low, 
+                                   position_text + "\nEntry: " + str.tostring(strategy.position_avg_price),
+                                   style=strategy.position_size > 0 ? label.style_label_down : label.style_label_up,
+                                   color=position_color, textcolor=color.white, size=size.normal)
